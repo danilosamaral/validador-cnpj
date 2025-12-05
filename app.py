@@ -6,7 +6,7 @@ import re
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Validador CNPJ - Versão 10", layout="wide")
 
-st.title("🔎 Validador de Aderência (Correção de Leitura)")
+st.title("🔎 Validador de Aderência ")
 st.markdown("---")
 
 # --- FUNÇÕES (MOTOR) ---
@@ -283,4 +283,5 @@ else:
                     },
                     hide_index=True,
                     use_container_width=True
+
                 )
