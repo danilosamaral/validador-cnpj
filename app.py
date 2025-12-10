@@ -4,14 +4,14 @@ import pandas as pd
 import re
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Validador de Aderência ao Comércio - Lógica Sequencial", layout="wide")
+st.set_page_config(page_title="Validador Final", layout="wide")
 
-st.title("⚖️ Validador de Aderência (Lógica Sequencial)")
+st.title("⚖️ Validador de Aderência (Oficial)")
 st.markdown("""
 **Fluxo de Análise:**
-1. **Natureza Jurídica:** Pré-requisito obrigatório. Se falhar, encerra.
-2. **CNAEs:** Analisa todos. Se houver algum permitido, aprova.
-3. **CNPJ:** Se nenhum CNAE for permitido, verifica se o CNPJ é exceção.
+1. **Natureza Jurídica:** Pré-requisito eliminatório.
+2. **CNAEs:** Classificatório (busca aderência no Principal ou Secundários).
+3. **CNPJ:** Repescagem (busca na lista de exceções).
 """)
 st.markdown("---")
 
@@ -19,15 +19,20 @@ st.markdown("---")
 
 @st.cache_data
 def carregar_dados(arquivo):
+    """
+    Lê o arquivo tentando diferentes codificações para evitar erros como 'Ã£o'.
+    """
     try:
         nome = arquivo.name.lower()
         if nome.endswith('.xlsx') or nome.endswith('.xls'):
             return pd.read_excel(arquivo, dtype=str)
         else:
+            # Tenta ler como UTF-8 primeiro
             try:
-                return pd.read_csv(arquivo, sep=';', encoding='latin1', dtype=str)
-            except:
                 return pd.read_csv(arquivo, sep=';', encoding='utf-8', dtype=str)
+            except UnicodeDecodeError:
+                # Se falhar, tenta Latin-1 (comum no Excel Brasil)
+                return pd.read_csv(arquivo, sep=';', encoding='latin1', dtype=str)
     except Exception as e:
         st.error(f"Erro ao ler arquivo: {e}")
         return None
@@ -41,8 +46,10 @@ def limpar_espacos(texto):
     return re.sub(r'\s+', ' ', texto).strip()
 
 def validar_regra_sim(valor):
+    """Verifica se a célula contém SIM/S/OK."""
     if pd.isna(valor): return False
     v = str(valor).strip().upper()
+    # Lista de termos aceitos como POSITIVO
     return v in ['SIM', 'S', 'PERMITIDO', 'OK', 'VERDADEIRO', 'YES', 'ADERENTE']
 
 def extrair_dados_completos(pdf_file):
@@ -134,7 +141,6 @@ if f_cp:
     df_cp = carregar_dados(f_cp)
     if df_cp is not None:
         c_cp_val = st.sidebar.selectbox("Coluna CNPJ", df_cp.columns, key="cpc")
-        # Campo novo para ler o resultado esperado na planilha 3
         c_cp_res = st.sidebar.selectbox("Coluna 'Aderência/Resultado'", df_cp.columns, index=min(1, len(df_cp.columns)-1), key="cp_res")
 
 # --- ÁREA PRINCIPAL ---
@@ -144,7 +150,7 @@ else:
     pdf_file = st.file_uploader("Arraste o PDF do Cartão CNPJ aqui", type=["pdf"])
 
     if pdf_file:
-        with st.spinner("Processando..."):
+        with st.spinner("Analisando documentos..."):
             dados = extrair_dados_completos(pdf_file)
             
             # --- CABEÇALHO ---
@@ -157,7 +163,7 @@ else:
                 st.markdown(f"**CNPJ:** {dados['cnpj']}")
             st.divider()
 
-            # Variáveis principais
+            # Chaves de busca
             nj_key = apenas_numeros(dados['nat_jur_cod'])
             
             # ==========================================================
@@ -175,17 +181,19 @@ else:
                     nj_aprovada = True
                     justificativa_nj = "Natureza Jurídica Aderente."
                 else:
-                    justificativa_nj = f"Natureza Jurídica não permitida (Regra='{regra}')."
+                    # CORREÇÃO AQUI: Mensagem simplificada sem mostrar o valor da regra
+                    justificativa_nj = "Natureza Jurídica não permitida."
             else:
-                justificativa_nj = f"Código {dados['nat_jur_cod']} não encontrado na planilha de regras."
+                justificativa_nj = f"Código {dados['nat_jur_cod']} não encontrado na tabela."
 
             # SE FALHOU NA NJ, PARA TUDO.
             if not nj_aprovada:
                 st.error("❌ REPROVADO (Fase 1)")
-                st.markdown("**Motivo:** A Natureza Jurídica da empresa não é aderente ao Plano.")
+                st.markdown("**Motivo:** A Natureza Jurídica da empresa não atende aos requisitos.")
+                # Exibe a justificativa limpa, sem caracteres estranhos
                 st.warning(f"**Justificativa:** {justificativa_nj}")
-                st.markdown(f"**Descrição:** {dados['nat_jur_completa']}")
-                st.stop() # Encerra o programa aqui
+                st.markdown(f"**Descrição no PDF:** {dados['nat_jur_completa']}")
+                st.stop()
             
             # SE PASSOU, CONTINUA...
             st.success("✅ FASE 1 OK: Natureza Jurídica Aderente. Analisando CNAEs...")
@@ -231,7 +239,6 @@ else:
                     "Status": status_s
                 })
 
-            # Exibe tabela de CNAEs
             st.markdown("#### Análise Detalhada dos CNAEs Encontrados")
             df_rel = pd.DataFrame(relatorio_cnaes)
             st.dataframe(df_rel, use_container_width=True, hide_index=True)
@@ -239,21 +246,19 @@ else:
             if algum_cnae_ok:
                 st.success("✅ APROVADO (Fase 2)")
                 st.markdown("**Motivo:** Natureza Jurídica OK + Pelo menos um CNAE Aderente.")
-                st.stop() # Encerra pois já aprovou
+                st.stop()
 
             # ==========================================================
             # PASSO 3: CNPJ (REPESCAGEM)
             # ==========================================================
-            st.info("⚠️ Nenhum CNAE aderente encontrado. Buscando CNPJ na Lista de Exceções...")
+            st.info("⚠️ Nenhum CNAE aderente. Verificando Lista de Exceções...")
             
             cnpj_key = apenas_numeros(dados['cnpj'])
             df_cp['TEMP_KEY'] = df_cp[c_cp_val].apply(apenas_numeros)
             match_cp = df_cp[df_cp['TEMP_KEY'] == cnpj_key]
 
             if not match_cp.empty:
-                # Busca o resultado na coluna indicada (Aderência ao Plano)
                 resultado_planilha = match_cp.iloc[0][c_cp_res]
-                
                 st.success("✅ APROVADO (Fase 3 - Exceção)")
                 st.markdown("**Motivo:** Natureza Jurídica OK + CNPJ na Lista de Exceções.")
                 st.markdown(f"**Resultado Indicado na Planilha:** {resultado_planilha}")
