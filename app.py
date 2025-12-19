@@ -20,14 +20,14 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 
 # Natureza Jurídica
 CFG_NJ = {
-    "col_codigo": "CODIGO",
+    "col_codigo": "NATJUR",
     "col_regra": "ADERENCIA"
 }
 
 # CNAEs (COM A NOVA COLUNA DE JUSTIFICATIVA)
 CFG_CNAE = {
     "col_codigo": "CNAE",           # Onde está o número (ex: 47.11-3-02)
-    "col_regra": "PERMITIDO",       # Onde está o Sim/Não
+    "col_regra": "ADERENTE",       # Onde está o Sim/Não
     "col_justificativa": "JUSTIFICATIVA" # <--- NOVA COLUNA DE OBSERVAÇÕES
 }
 
