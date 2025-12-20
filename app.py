@@ -20,7 +20,7 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 
 # Configuração para Natureza Jurídica (.csv)
 CFG_NJ = {
-    "col_codigo": "CODIGO",         # Nome da coluna com o código (ex: 213-5)
+    "col_codigo": "NATJUR",         # Nome da coluna com o código (ex: 213-5)
     "col_regra": "ADERENCIA"        # Nome da coluna com Sim/Não
 }
 
