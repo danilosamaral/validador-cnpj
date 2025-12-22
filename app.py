@@ -22,7 +22,7 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 CFG_NJ = {
     "col_codigo": "NATJUR",
     "col_regra": "ADERENCIA",
-    "col_justificativa": "WHY"      # <--- NOVA COLUNA SOLICITADA
+    "col_justificativa": "OBS"      # <--- NOVA COLUNA SOLICITADA
 }
 
 # CNAEs (ATUALIZADO PARA 'JUST')
@@ -300,4 +300,5 @@ if pdf_file:
             st.markdown(f"**Justificativa na Planilha:** {res}")
         else:
             st.error("❌ REPROVADO (Final)")
+
             st.markdown("Empresa não atende aos requisitos.")
