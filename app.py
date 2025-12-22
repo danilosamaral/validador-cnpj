@@ -20,7 +20,7 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 
 # Natureza Jurídica (ATUALIZADO COM COLUNA 'OBS')
 CFG_NJ = {
-    "col_codigo": "CODIGO",
+    "col_codigo": "NATJUR",
     "col_regra": "ADERENCIA",
     "col_justificativa": "OBS"      # <--- NOVA COLUNA SOLICITADA
 }
