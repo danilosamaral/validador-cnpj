@@ -23,7 +23,7 @@ COL_NJ_OBS = "OBS"          # <--- Coluna nova que você pediu
 
 # Colunas - CNAE
 COL_CNAE_CODIGO = "CNAE"
-COL_CNAE_REGRA = "PERMITIDO"
+COL_CNAE_REGRA = "ADERENTE"
 
 # Colunas - CNPJ
 COL_CNPJ_NUM = "CNPJ"
