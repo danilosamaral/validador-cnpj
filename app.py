@@ -22,7 +22,7 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 CFG_NJ = {
     "col_codigo": "NATJUR",
     "col_regra": "ADERENCIA",
-    "col_justificativa": "OBS"      # <--- NOVA COLUNA SOLICITADA
+    "col_justificativa": "WHY"      # <--- NOVA COLUNA SOLICITADA
 }
 
 # CNAEs (ATUALIZADO PARA 'JUST')
