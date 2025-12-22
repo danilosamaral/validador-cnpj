@@ -8,7 +8,7 @@ import os
 st.set_page_config(page_title="Validador Corporativo", layout="wide")
 
 # ==============================================================================
-# 🔧 ÁREA DE CONFIGURAÇÃO
+# 🔧 ÁREA DE CONFIGURAÇÃO (AJUSTADA)
 # ==============================================================================
 
 # 1. NOMES DOS ARQUIVOS
@@ -18,17 +18,18 @@ ARQUIVO_CNPJ = "regras_cnpj.parquet"
 
 # 2. MAPEAMENTO DAS COLUNAS
 
-# Natureza Jurídica
+# Natureza Jurídica (ATUALIZADO COM COLUNA 'OBS')
 CFG_NJ = {
-    "col_codigo": "NATJUR",
-    "col_regra": "ADERENCIA"
+    "col_codigo": "CODIGO",
+    "col_regra": "ADERENCIA",
+    "col_justificativa": "OBS"      # <--- NOVA COLUNA SOLICITADA
 }
 
-# CNAEs (COM A NOVA COLUNA DE JUSTIFICATIVA)
+# CNAEs (ATUALIZADO PARA 'JUST')
 CFG_CNAE = {
-    "col_codigo": "CNAE",           # Onde está o número (ex: 47.11-3-02)
-    "col_regra": "ADERENTE",       # Onde está o Sim/Não
-    "col_justificativa": "JUST" # <--- NOVA COLUNA DE OBSERVAÇÕES
+    "col_codigo": "CNAE",
+    "col_regra": "PERMITIDO",
+    "col_justificativa": "JUST"     # <--- NOME ALTERADO
 }
 
 # Exceções de CNPJ
@@ -38,7 +39,7 @@ CFG_CNPJ = {
 }
 # ==============================================================================
 
-st.title("🏢 Validador de Aderência (Com Observações)")
+st.title("🏢 Validador de Aderência (Versão Final)")
 st.markdown("---")
 
 # --- FUNÇÕES ---
@@ -139,12 +140,15 @@ if erro_cp: erros.append(f"Erro CNPJ: {erro_cp}")
 
 if not erros:
     if CFG_NJ['col_codigo'] not in df_nj.columns: erros.append(f"Coluna '{CFG_NJ['col_codigo']}' não existe em {ARQUIVO_NJ}")
+    # Verifica OBS na NJ
+    if CFG_NJ['col_justificativa'] not in df_nj.columns: erros.append(f"Coluna '{CFG_NJ['col_justificativa']}' (OBS) não existe em {ARQUIVO_NJ}")
+    
     if CFG_CNAE['col_codigo'] not in df_cn.columns: erros.append(f"Coluna '{CFG_CNAE['col_codigo']}' não existe em {ARQUIVO_CNAE}")
-    # Verifica se a nova coluna de justificativa existe
-    if CFG_CNAE['col_justificativa'] not in df_cn.columns: erros.append(f"Coluna '{CFG_CNAE['col_justificativa']}' (Observação) não existe em {ARQUIVO_CNAE}")
+    # Verifica JUST no CNAE
+    if CFG_CNAE['col_justificativa'] not in df_cn.columns: erros.append(f"Coluna '{CFG_CNAE['col_justificativa']}' (JUST) não existe em {ARQUIVO_CNAE}")
 
 if erros:
-    st.error("🚨 ERRO DE CONFIGURAÇÃO")
+    st.error("🚨 ERRO DE CONFIGURAÇÃO DAS PLANILHAS")
     for e in erros: st.text(e)
     st.stop()
 else:
@@ -167,42 +171,61 @@ if pdf_file:
             st.markdown(f"**CNPJ:** {dados['cnpj']}")
         st.divider()
 
+        # ------------------------------------------------------------------
         # FASE 1: NATUREZA JURÍDICA
+        # ------------------------------------------------------------------
         nj_key = apenas_numeros(dados['nat_jur_cod'])
         nj_aprovada = False
-        justificativa_nj = ""
+        msg_nj = ""
+        obs_nj = "" # Variável para guardar o texto da coluna OBS
         
         df_nj['TEMP_KEY'] = df_nj[CFG_NJ['col_codigo']].apply(apenas_numeros)
         match_nj = df_nj[df_nj['TEMP_KEY'] == nj_key]
 
         if not match_nj.empty:
+            # Pega regra
             regra = match_nj.iloc[0][CFG_NJ['col_regra']]
+            
+            # Pega observação (coluna OBS)
+            val_obs = match_nj.iloc[0][CFG_NJ['col_justificativa']]
+            if not pd.isna(val_obs):
+                obs_nj = str(val_obs)
+
             if validar_regra_sim(regra):
                 nj_aprovada = True
-                justificativa_nj = "Natureza Jurídica Aderente."
+                msg_nj = "Natureza Jurídica Aderente."
             else:
-                justificativa_nj = "Natureza Jurídica não permitida."
+                msg_nj = "Natureza Jurídica não permitida."
         else:
-            justificativa_nj = f"Código {dados['nat_jur_cod']} não encontrado."
+            msg_nj = f"Código {dados['nat_jur_cod']} não encontrado."
 
         if not nj_aprovada:
             st.error("❌ REPROVADO (Fase 1)")
             st.markdown("**Motivo:** Natureza Jurídica Incompatível.")
-            st.warning(f"**Justificativa:** {justificativa_nj}")
+            st.warning(f"**Status:** {msg_nj}")
+            
+            # Se tiver observação na planilha (ex: explicando pq é proibido), mostra aqui:
+            if obs_nj:
+                st.info(f"**Observação da Planilha (OBS):** {obs_nj}")
+            
             st.stop()
         
         st.success("✅ FASE 1 OK: Natureza Jurídica. Verificando CNAEs...")
+        if obs_nj:
+            st.caption(f"Nota sobre a Natureza Jurídica: {obs_nj}")
         
+        # ------------------------------------------------------------------
         # FASE 2: CNAES
+        # ------------------------------------------------------------------
         cnae_p_key = apenas_numeros(dados['cnae_principal_cod'])
         df_cn['TEMP_KEY'] = df_cn[CFG_CNAE['col_codigo']].apply(apenas_numeros)
         
         relatorio_cnaes = []
         algum_cnae_ok = False
 
-        # --- Lógica de Captura (Principal) ---
+        # --- Principal ---
         status_p = "❌ Não Aderente"
-        obs_p = "" # Variável para guardar a justificativa
+        obs_p = ""
         
         match_p = df_cn[df_cn['TEMP_KEY'] == cnae_p_key]
         if not match_p.empty:
@@ -210,7 +233,7 @@ if pdf_file:
                 status_p = "✅ Aderente"
                 algum_cnae_ok = True
             
-            # Pega a justificativa (se houver)
+            # Pega a justificativa (Coluna JUST)
             val_obs = match_p.iloc[0][CFG_CNAE['col_justificativa']]
             if not pd.isna(val_obs):
                 obs_p = str(val_obs)
@@ -220,10 +243,10 @@ if pdf_file:
             "Código": dados['cnae_principal_cod'], 
             "Descrição": dados['cnae_principal_completo'], 
             "Status": status_p,
-            "Observação": obs_p # Nova coluna no relatório
+            "Observação (JUST)": obs_p
         })
 
-        # --- Lógica de Captura (Secundários) ---
+        # --- Secundários ---
         for cod, desc in dados['cnaes_secundarios']:
             s_key = apenas_numeros(cod)
             status_s = "❌ Não Aderente"
@@ -235,7 +258,7 @@ if pdf_file:
                     status_s = "✅ Aderente"
                     algum_cnae_ok = True
                 
-                # Pega a justificativa
+                # Pega a justificativa (Coluna JUST)
                 val_obs = match_s.iloc[0][CFG_CNAE['col_justificativa']]
                 if not pd.isna(val_obs):
                     obs_s = str(val_obs)
@@ -245,16 +268,16 @@ if pdf_file:
                 "Código": cod, 
                 "Descrição": desc, 
                 "Status": status_s,
-                "Observação": obs_s
+                "Observação (JUST)": obs_s
             })
 
-        # Exibe a tabela com a nova coluna
+        # Exibe a tabela
         st.dataframe(
             pd.DataFrame(relatorio_cnaes), 
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "Observação": st.column_config.TextColumn("Observação/Detalhe", width="medium")
+                "Observação (JUST)": st.column_config.TextColumn("Observação", width="medium")
             }
         )
 
@@ -263,7 +286,9 @@ if pdf_file:
             st.markdown("**Motivo:** Possui CNAE aderente.")
             st.stop()
 
+        # ------------------------------------------------------------------
         # FASE 3: CNPJ
+        # ------------------------------------------------------------------
         st.info("⚠️ CNAEs não aderentes. Checando exceções...")
         cnpj_key = apenas_numeros(dados['cnpj'])
         df_cp['TEMP_KEY'] = df_cp[CFG_CNPJ['col_cnpj']].apply(apenas_numeros)
