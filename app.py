@@ -27,43 +27,48 @@ COL_CNPJ_NUM = "CNPJ"
 COL_CNPJ_RES = "RESULTADO"
 
 # ==============================================================================
-# CORREÇÃO DE ENCODING
+# CORREÇÃO DE ENCODING E TEXTO
 # ==============================================================================
 def corrigir_encoding(texto):
     if texto is None or pd.isna(texto):
         return texto
     texto = str(texto)
     try:
-        # Tenta corrigir caracteres bugados comuns em transição ANSI/UTF-8
         return texto.encode("latin1").decode("utf-8")
     except:
         return texto
 
+def limpar_obs(valor):
+    """Retorna a string limpa ou VAZIO se for NaN/None/nan."""
+    if pd.isna(valor) or valor is None:
+        return ""
+    
+    s = str(valor).strip()
+    
+    # Se for "nan" (texto gerado pelo pandas) ou vazio, retorna nada
+    if s.lower() == "nan" or s == "":
+        return ""
+        
+    return s
+
 # ==============================================================================
-# CARREGAMENTO ROBUSTO DE BASES
+# CARREGAMENTO DE BASES
 # ==============================================================================
 @st.cache_data
 def carregar_base(caminho):
-    """
-    Carrega CSV, Excel ou Parquet.
-    Pré-requisito para Parquet: biblioteca 'pyarrow' instalada.
-    """
     if not os.path.exists(caminho):
         return None, f"Arquivo não encontrado: {caminho}"
 
     try:
         df = None
-
         # ---- 1. PARQUET ----
         if caminho.lower().endswith(".parquet"):
-            # Parquet é binário, não existe fallback para CSV.
-            # Se falhar aqui, geralmente é falta de 'pyarrow' ou arquivo corrompido.
             try:
                 df = pd.read_parquet(caminho, engine='pyarrow')
             except ImportError:
-                return None, "Erro: Biblioteca 'pyarrow' não instalada. Adicione ao requirements.txt."
+                return None, "Erro: Biblioteca 'pyarrow' ausente."
             except Exception as e:
-                return None, f"Erro ao ler Parquet: {e}"
+                return None, f"Erro Parquet: {e}"
 
         # ---- 2. EXCEL ----
         elif caminho.lower().endswith((".xlsx", ".xls")):
@@ -76,38 +81,32 @@ def carregar_base(caminho):
             except:
                 df = pd.read_csv(caminho, sep=";", encoding="latin1", dtype=str)
 
-        # ---- TRATAMENTO PÓS-LEITURA ----
         if df is not None:
-            # Padronização de colunas (Remove espaços e joga pra Maiúsculo)
+            # Padroniza colunas (Maiúsculo e sem espaços)
             df.columns = [str(c).strip().upper() for c in df.columns]
-
-            # Correção de encoding nas células
+            # Corrige encoding dos dados
             for c in df.columns:
                 df[c] = df[c].apply(corrigir_encoding)
-
             return df, None
         else:
-            return None, "Formato de arquivo não reconhecido."
+            return None, "Formato desconhecido."
 
     except Exception as e:
-        return None, f"Erro crítico ao processar {caminho}: {e}"
+        return None, f"Erro crítico: {e}"
 
 # ==============================================================================
 # FUNÇÕES AUXILIARES
 # ==============================================================================
 def apenas_numeros(v):
-    if not v:
-        return ""
+    if not v: return ""
     return re.sub(r"\D", "", str(v))
 
 def limpar_espacos(v):
-    if not v:
-        return ""
+    if not v: return ""
     return re.sub(r"\s+", " ", v).strip()
 
 def validar_sim(v):
-    if pd.isna(v):
-        return False
+    if pd.isna(v): return False
     return str(v).strip().upper() in {
         "SIM", "S", "PERMITIDO", "OK", "ADERENTE", "YES", "VERDADEIRO"
     }
@@ -124,10 +123,8 @@ def extrair_pdf(pdf_file):
     dados = {
         "nome": "Não identificado",
         "cnpj": "",
-        "nj_cod": "",
-        "nj_texto": "",
-        "cnae_p_cod": "",
-        "cnae_p_texto": "",
+        "nj_cod": "", "nj_texto": "",
+        "cnae_p_cod": "", "cnae_p_texto": "",
         "cnae_s_lista": []
     }
 
@@ -140,16 +137,14 @@ def extrair_pdf(pdf_file):
     if m := re.search(r"NATUREZA JURÍDICA.*?\n(\d{3}-\d.*?)\n", texto, re.DOTALL):
         t = limpar_espacos(m.group(1))
         dados["nj_texto"] = t
-        if c := re.search(r"\d{3}-\d", t):
-            dados["nj_cod"] = c.group(0)
+        if c := re.search(r"\d{3}-\d", t): dados["nj_cod"] = c.group(0)
 
     if m := re.search(r"ATIVIDADE ECON[ÔÓO]MICA PRINCIPAL", texto, re.IGNORECASE):
         pos = texto[m.end():]
         if v := re.search(r"(\d{2}\.\d{2}-\d-\d{2}.*?)\n", pos):
             t = limpar_espacos(v.group(1))
             dados["cnae_p_texto"] = t
-            if c := re.search(r"\d{2}\.\d{2}-\d-\d{2}", t):
-                dados["cnae_p_cod"] = c.group(0)
+            if c := re.search(r"\d{2}\.\d{2}-\d-\d{2}", t): dados["cnae_p_cod"] = c.group(0)
 
     if m := re.search(r"ATIVIDADES ECONÔMICAS SECUNDÁRIAS(.*?)NATUREZA", texto, re.DOTALL):
         for l in re.findall(r"(\d{2}\.\d{2}-\d-\d{2}.*?)\n", m.group(1)):
@@ -165,22 +160,18 @@ def extrair_pdf(pdf_file):
 st.title("⚖️ Validador de Aderência Corporativa")
 st.divider()
 
-# Carregamento das bases
-with st.spinner("Carregando bases de regras..."):
+# Carregamento
+with st.spinner("Carregando bases..."):
     df_nj, e1 = carregar_base(ARQ_NJ)
     df_cn, e2 = carregar_base(ARQ_CNAE)
     df_cp, e3 = carregar_base(ARQ_CNPJ)
 
-# Verificação de erros no carregamento
 erros = [e for e in (e1, e2, e3) if e]
 if erros:
-    st.error("🛑 Erro Fatal ao carregar arquivos de regras:")
-    for e in erros:
-        st.code(e) # Mostra o erro formatado
-    st.info("Dica: Verifique se os arquivos estão na pasta e se o 'pyarrow' está instalado.")
+    st.error("🛑 Erro ao carregar bases de regras")
+    for e in erros: st.code(e)
     st.stop()
 
-# Upload e Processamento
 arquivo = st.file_uploader("Upload do PDF do CNPJ", type=["pdf"])
 
 if arquivo:
@@ -201,23 +192,23 @@ if arquivo:
     m_nj = df_nj[df_nj["KEY"] == key_nj]
 
     obs = ""
-    # Se não achou na tabela OU a regra não é SIM
+    # Se encontrou registro, tenta pegar a obs e limpar
+    if not m_nj.empty and COL_NJ_OBS in m_nj.columns:
+        obs = limpar_obs(m_nj.iloc[0][COL_NJ_OBS])
+
+    # Lógica de Aprovação/Reprovação
     if m_nj.empty or not validar_sim(m_nj.iloc[0][COL_NJ_REGRA]):
-        # Tenta pegar a observação se ela existir (para explicar o erro)
-        if not m_nj.empty and COL_NJ_OBS in m_nj.columns:
-            obs = m_nj.iloc[0][COL_NJ_OBS]
-        
         st.error("❌ REPROVADO (Fase 1)")
-        st.markdown(f"Natureza Jurídica não permitida ou não encontrada.")
+        st.markdown("Natureza Jurídica não permitida ou não encontrada.")
+        
+        # Só mostra obs se ela tiver texto (não for vazia)
         if obs:
             st.info(f"📝 **Nota:** {obs}")
         st.stop()
 
-    # Se passou (Aprovado), pega a obs também
-    if COL_NJ_OBS in m_nj.columns:
-        obs = m_nj.iloc[0][COL_NJ_OBS]
-
     st.success("✅ FASE 1 OK: Natureza Jurídica Aderente")
+    
+    # Só mostra obs se ela tiver texto (não for vazia)
     if obs:
         st.info(f"📝 **Observação:** {obs}")
 
@@ -235,13 +226,8 @@ if arquivo:
     if not m.empty and validar_sim(m.iloc[0][COL_CNAE_REGRA]):
         status = "✅ Aderente"
         aprovado_cnae = True
-
-    relatorio.append({
-        "Tipo": "Principal",
-        "Código": d["cnae_p_cod"],
-        "Descrição": d["cnae_p_texto"],
-        "Status": status
-    })
+    
+    relatorio.append({"Tipo": "Principal", "Código": d["cnae_p_cod"], "Descrição": d["cnae_p_texto"], "Status": status})
 
     # Secundários
     for cod, txt in d["cnae_s_lista"]:
@@ -251,13 +237,8 @@ if arquivo:
         if not m.empty and validar_sim(m.iloc[0][COL_CNAE_REGRA]):
             status = "✅ Aderente"
             aprovado_cnae = True
-
-        relatorio.append({
-            "Tipo": "Secundário",
-            "Código": cod,
-            "Descrição": txt,
-            "Status": status
-        })
+        
+        relatorio.append({"Tipo": "Secundário", "Código": cod, "Descrição": txt, "Status": status})
 
     st.dataframe(pd.DataFrame(relatorio), use_container_width=True, hide_index=True)
 
@@ -269,7 +250,7 @@ if arquivo:
     # =========================
     # FASE 3 – CNPJ (EXCEÇÃO)
     # =========================
-    st.warning("⚠️ CNAEs não aderentes. Verificando exceções por CNPJ...")
+    st.warning("⚠️ CNAEs não aderentes. Verificando exceções...")
 
     df_cp["KEY"] = df_cp[COL_CNPJ_NUM].apply(apenas_numeros)
     k_cnpj = apenas_numeros(d["cnpj"])
