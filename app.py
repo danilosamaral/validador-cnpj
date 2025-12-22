@@ -34,52 +34,63 @@ def corrigir_encoding(texto):
         return texto
     texto = str(texto)
     try:
+        # Tenta corrigir caracteres bugados comuns em transição ANSI/UTF-8
         return texto.encode("latin1").decode("utf-8")
     except:
         return texto
 
 # ==============================================================================
-# CARREGAMENTO ROBUSTO DE BASES (PARQUET + FALLBACK)
+# CARREGAMENTO ROBUSTO DE BASES
 # ==============================================================================
 @st.cache_data
 def carregar_base(caminho):
+    """
+    Carrega CSV, Excel ou Parquet.
+    Pré-requisito para Parquet: biblioteca 'pyarrow' instalada.
+    """
     if not os.path.exists(caminho):
         return None, f"Arquivo não encontrado: {caminho}"
 
     try:
-        # ---- PARQUET (com fallback) ----
-        if caminho.lower().endswith(".parquet"):
-            try:
-                df = pd.read_parquet(caminho)
-            except Exception:
-                # fallback CSV
-                try:
-                    df = pd.read_csv(caminho, sep=";", encoding="utf-8", dtype=str)
-                except:
-                    df = pd.read_csv(caminho, sep=";", encoding="latin1", dtype=str)
+        df = None
 
-        # ---- EXCEL ----
+        # ---- 1. PARQUET ----
+        if caminho.lower().endswith(".parquet"):
+            # Parquet é binário, não existe fallback para CSV.
+            # Se falhar aqui, geralmente é falta de 'pyarrow' ou arquivo corrompido.
+            try:
+                df = pd.read_parquet(caminho, engine='pyarrow')
+            except ImportError:
+                return None, "Erro: Biblioteca 'pyarrow' não instalada. Adicione ao requirements.txt."
+            except Exception as e:
+                return None, f"Erro ao ler Parquet: {e}"
+
+        # ---- 2. EXCEL ----
         elif caminho.lower().endswith((".xlsx", ".xls")):
             df = pd.read_excel(caminho, dtype=str)
 
-        # ---- CSV ----
+        # ---- 3. CSV ----
         else:
             try:
                 df = pd.read_csv(caminho, sep=";", encoding="utf-8", dtype=str)
             except:
                 df = pd.read_csv(caminho, sep=";", encoding="latin1", dtype=str)
 
-        # Padronização de colunas
-        df.columns = [str(c).strip().upper() for c in df.columns]
+        # ---- TRATAMENTO PÓS-LEITURA ----
+        if df is not None:
+            # Padronização de colunas (Remove espaços e joga pra Maiúsculo)
+            df.columns = [str(c).strip().upper() for c in df.columns]
 
-        # Correção de encoding em TODAS as colunas
-        for c in df.columns:
-            df[c] = df[c].apply(corrigir_encoding)
+            # Correção de encoding nas células
+            for c in df.columns:
+                df[c] = df[c].apply(corrigir_encoding)
 
-        return df, None
+            return df, None
+        else:
+            return None, "Formato de arquivo não reconhecido."
 
     except Exception as e:
-        return None, f"Erro ao ler {caminho}: {e}"
+        return None, f"Erro crítico ao processar {caminho}: {e}"
 
 # ==============================================================================
 # FUNÇÕES AUXILIARES
@@ -149,23 +160,27 @@ def extrair_pdf(pdf_file):
     return dados
 
 # ==============================================================================
-# APP
+# APP PRINCIPAL
 # ==============================================================================
 st.title("⚖️ Validador de Aderência Corporativa")
 st.divider()
 
-with st.spinner("Carregando bases..."):
+# Carregamento das bases
+with st.spinner("Carregando bases de regras..."):
     df_nj, e1 = carregar_base(ARQ_NJ)
     df_cn, e2 = carregar_base(ARQ_CNAE)
     df_cp, e3 = carregar_base(ARQ_CNPJ)
 
+# Verificação de erros no carregamento
 erros = [e for e in (e1, e2, e3) if e]
 if erros:
-    st.error("Erro ao carregar bases")
+    st.error("🛑 Erro Fatal ao carregar arquivos de regras:")
     for e in erros:
-        st.text(e)
+        st.code(e) # Mostra o erro formatado
+    st.info("Dica: Verifique se os arquivos estão na pasta e se o 'pyarrow' está instalado.")
     st.stop()
 
+# Upload e Processamento
 arquivo = st.file_uploader("Upload do PDF do CNPJ", type=["pdf"])
 
 if arquivo:
@@ -186,15 +201,19 @@ if arquivo:
     m_nj = df_nj[df_nj["KEY"] == key_nj]
 
     obs = ""
+    # Se não achou na tabela OU a regra não é SIM
     if m_nj.empty or not validar_sim(m_nj.iloc[0][COL_NJ_REGRA]):
+        # Tenta pegar a observação se ela existir (para explicar o erro)
         if not m_nj.empty and COL_NJ_OBS in m_nj.columns:
             obs = m_nj.iloc[0][COL_NJ_OBS]
+        
         st.error("❌ REPROVADO (Fase 1)")
-        st.markdown("Natureza Jurídica não permitida.")
+        st.markdown(f"Natureza Jurídica não permitida ou não encontrada.")
         if obs:
             st.info(f"📝 **Nota:** {obs}")
         st.stop()
 
+    # Se passou (Aprovado), pega a obs também
     if COL_NJ_OBS in m_nj.columns:
         obs = m_nj.iloc[0][COL_NJ_OBS]
 
