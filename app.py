@@ -20,12 +20,12 @@ ARQ_CNPJ = "regras_cnpj.parquet"
 # Apenas 2 colunas por arquivo: Identificador e Regra
 
 # 1. Natureza Jurídica
-COL_NJ_CODIGO = "CODIGO"       # Ex: 213-5
+COL_NJ_CODIGO = "NATJUR"       # Ex: 213-5
 COL_NJ_REGRA = "ADERENCIA"     # Ex: Sim
 
 # 2. CNAEs
 COL_CNAE_CODIGO = "CNAE"       # Ex: 47.11-3-02
-COL_CNAE_REGRA = "PERMITIDO"   # Ex: Sim
+COL_CNAE_REGRA = "ADERENTE"   # Ex: Sim
 
 # 3. CNPJ (Exceções)
 COL_CNPJ_NUM = "CNPJ"          # O número do CNPJ
