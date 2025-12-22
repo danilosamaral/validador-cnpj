@@ -5,60 +5,58 @@ import re
 import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Validador Corporativo (Estável)", layout="wide")
+st.set_page_config(page_title="Validador Corporativo", layout="wide")
 
 # ==============================================================================
-# 🔧 ÁREA DE CONFIGURAÇÃO SIMPLIFICADA
+# 🔧 ÁREA DE CONFIGURAÇÃO
 # ==============================================================================
 
-# Nomes dos arquivos (Devem estar na mesma pasta)
+# Arquivos
 ARQ_NJ = "regras_nj.csv"
 ARQ_CNAE = "regras_cnae.xlsx"
 ARQ_CNPJ = "regras_cnpj.parquet"
 
-# Nomes EXATOS das colunas (Verifique seus arquivos!)
-# Apenas 2 colunas por arquivo: Identificador e Regra
+# Colunas - Natureza Jurídica
+COL_NJ_CODIGO = "NATJUR"
+COL_NJ_REGRA = "ADERENCIA"
+COL_NJ_OBS = "OBS"          # <--- Coluna nova que você pediu
 
-# 1. Natureza Jurídica
-COL_NJ_CODIGO = "NATJUR"       # Ex: 213-5
-COL_NJ_REGRA = "ADERENCIA"     # Ex: Sim
+# Colunas - CNAE
+COL_CNAE_CODIGO = "CNAE"
+COL_CNAE_REGRA = "PERMITIDO"
 
-# 2. CNAEs
-COL_CNAE_CODIGO = "CNAE"       # Ex: 47.11-3-02
-COL_CNAE_REGRA = "ADERENTE"   # Ex: Sim
-
-# 3. CNPJ (Exceções)
-COL_CNPJ_NUM = "CNPJ"          # O número do CNPJ
-COL_CNPJ_RES = "RESULTADO"     # O texto do resultado (ex: Aderente)
+# Colunas - CNPJ
+COL_CNPJ_NUM = "CNPJ"
+COL_CNPJ_RES = "RESULTADO"
 
 # ==============================================================================
 
-st.title("⚖️ Validador de Aderência (Versão Estável)")
+st.title("⚖️ Validador de Aderência (Com Observações)")
 st.markdown("---")
 
 # --- FUNÇÕES ---
 
 @st.cache_data
 def carregar_base(caminho):
-    """Lê o arquivo e limpa espaços nos nomes das colunas."""
+    """Lê o arquivo e padroniza colunas (Maiúsculo e sem espaços)."""
     if not os.path.exists(caminho):
         return None, f"Arquivo não encontrado: {caminho}"
     
     try:
         df = None
-        # Seleciona o leitor correto
         if caminho.endswith('.parquet'):
             df = pd.read_parquet(caminho)
         elif caminho.endswith('.xlsx') or caminho.endswith('.xls'):
             df = pd.read_excel(caminho, dtype=str)
         else:
-            # Tenta ler CSV (ponto e vírgula ou vírgula)
             try:
                 df = pd.read_csv(caminho, sep=';', encoding='latin1', dtype=str)
             except:
                 df = pd.read_csv(caminho, sep=',', encoding='utf-8', dtype=str)
         
-        # Limpeza básica nos cabeçalhos (remove espaços invisíveis)
+        # LIMPEZA CRÍTICA DE CABEÇALHOS
+        # Converte tudo para MAIÚSCULO e remove espaços das pontas.
+        # Assim, 'obs', 'OBS ' e ' OBS' viram todos 'OBS'.
         if df is not None:
             df.columns = [str(c).strip().upper() for c in df.columns]
             return df, None
@@ -75,13 +73,11 @@ def limpar_espacos(texto):
     return re.sub(r'\s+', ' ', texto).strip()
 
 def validar_sim(valor):
-    """Verifica se é Sim/S/Permitido."""
     if pd.isna(valor): return False
     v = str(valor).strip().upper()
     return v in ['SIM', 'S', 'PERMITIDO', 'OK', 'VERDADEIRO', 'YES', 'ADERENTE']
 
 def extrair_pdf(pdf_file):
-    """Extrai dados do PDF."""
     texto = ""
     with pdfplumber.open(pdf_file) as pdf:
         for p in pdf.pages: texto += p.extract_text() or ""
@@ -94,7 +90,6 @@ def extrair_pdf(pdf_file):
         "cnae_s_lista": []
     }
 
-    # Regex padrão Receita Federal
     m_nome = re.search(r"NOME EMPRESARIAL\s*\n(.*?)\n\s*(?:TÍTULO|PORTE)", texto, re.DOTALL)
     if m_nome: dados['nome'] = limpar_espacos(m_nome.group(1))
 
@@ -127,7 +122,7 @@ def extrair_pdf(pdf_file):
 
     return dados
 
-# --- CARREGAMENTO INICIAL ---
+# --- CARREGAMENTO ---
 with st.spinner("Carregando bases..."):
     df_nj, err_nj = carregar_base(ARQ_NJ)
     df_cn, err_cn = carregar_base(ARQ_CNAE)
@@ -138,14 +133,17 @@ if err_nj: erros.append(f"Erro NJ: {err_nj}")
 if err_cn: erros.append(f"Erro CNAE: {err_cn}")
 if err_cp: erros.append(f"Erro CNPJ: {err_cp}")
 
-# Verifica se colunas existem (Maiúsculas)
 if not erros:
-    if COL_NJ_CODIGO not in df_nj.columns: erros.append(f"Coluna '{COL_NJ_CODIGO}' não existe no arquivo NJ.")
-    if COL_CNAE_CODIGO not in df_cn.columns: erros.append(f"Coluna '{COL_CNAE_CODIGO}' não existe no arquivo CNAE.")
-    if COL_CNPJ_NUM not in df_cp.columns: erros.append(f"Coluna '{COL_CNPJ_NUM}' não existe no arquivo CNPJ.")
+    # Verifica se as colunas essenciais existem
+    if COL_NJ_CODIGO not in df_nj.columns: erros.append(f"Coluna '{COL_NJ_CODIGO}' não existe em NJ.")
+    if COL_CNAE_CODIGO not in df_cn.columns: erros.append(f"Coluna '{COL_CNAE_CODIGO}' não existe em CNAE.")
+    # Não vamos travar se a coluna OBS não existir, apenas avisar no console (warning)
+    if COL_NJ_OBS not in df_nj.columns:
+        # Se não existir, criamos ela vazia para o código não quebrar
+        df_nj[COL_NJ_OBS] = None 
 
 if erros:
-    st.error("🚨 ERRO DE LEITURA")
+    st.error("🚨 ERRO DE CONFIGURAÇÃO")
     for e in erros: st.text(e)
     st.stop()
 else:
@@ -159,7 +157,6 @@ if arquivo:
     with st.spinner("Analisando..."):
         d = extrair_pdf(arquivo)
         
-        # Exibe dados
         st.subheader("Dados Extraídos")
         c1, c2 = st.columns([2,1])
         c1.markdown(f"**Empresa:** {d['nome']}")
@@ -170,13 +167,23 @@ if arquivo:
         # --- FASE 1: NATUREZA JURÍDICA ---
         aprovado_nj = False
         msg_nj = ""
+        obs_texto = "" # Variável para guardar o texto da OBS
         
         key_nj = apenas_numeros(d['nj_cod'])
         df_nj['KEY'] = df_nj[COL_NJ_CODIGO].apply(apenas_numeros)
         
         match = df_nj[df_nj['KEY'] == key_nj]
+        
         if not match.empty:
             regra = match.iloc[0][COL_NJ_REGRA]
+            
+            # --- TENTATIVA DE LER A OBSERVAÇÃO ---
+            if COL_NJ_OBS in match.columns:
+                val_obs = match.iloc[0][COL_NJ_OBS]
+                if not pd.isna(val_obs):
+                    obs_texto = str(val_obs)
+            # -------------------------------------
+
             if validar_sim(regra):
                 aprovado_nj = True
                 msg_nj = "Natureza Jurídica Aderente."
@@ -188,19 +195,24 @@ if arquivo:
         if not aprovado_nj:
             st.error("❌ REPROVADO (Fase 1)")
             st.markdown(f"**Motivo:** {msg_nj}")
+            # Se tiver observação mesmo reprovado, mostra também (opcional, ajuda a entender pq reprovou)
+            if obs_texto:
+                st.info(f"ℹ️ **Nota:** {obs_texto}")
             st.stop()
         
+        # --- SUCESSO NA FASE 1 ---
         st.success(f"✅ FASE 1 OK: {msg_nj}")
-
+        
+        # AQUI ESTÁ A IMPLEMENTAÇÃO QUE VOCÊ PEDIU
+        if obs_texto:
+            st.info(f"📝 **Observação:** {obs_texto}")
+        
         # --- FASE 2: CNAES ---
         aprovado_cnae = False
-        
-        # Prepara tabela CNAE
         df_cn['KEY'] = df_cn[COL_CNAE_CODIGO].apply(apenas_numeros)
-        
         relatorio = []
         
-        # 1. Principal
+        # Principal
         k_p = apenas_numeros(d['cnae_p_cod'])
         sts_p = "❌ Não"
         m_p = df_cn[df_cn['KEY'] == k_p]
@@ -208,10 +220,9 @@ if arquivo:
             if validar_sim(m_p.iloc[0][COL_CNAE_REGRA]):
                 sts_p = "✅ Aderente"
                 aprovado_cnae = True
-        
         relatorio.append({"Tipo": "Principal", "Código": d['cnae_p_cod'], "Descrição": d['cnae_p_texto'], "Status": sts_p})
 
-        # 2. Secundários
+        # Secundários
         for cod, txt in d['cnae_s_lista']:
             k_s = apenas_numeros(cod)
             sts_s = "❌ Não"
@@ -220,7 +231,6 @@ if arquivo:
                 if validar_sim(m_s.iloc[0][COL_CNAE_REGRA]):
                     sts_s = "✅ Aderente"
                     aprovado_cnae = True
-            
             relatorio.append({"Tipo": "Secundário", "Código": cod, "Descrição": txt, "Status": sts_s})
 
         st.dataframe(pd.DataFrame(relatorio), use_container_width=True, hide_index=True)
@@ -232,10 +242,8 @@ if arquivo:
 
         # --- FASE 3: CNPJ ---
         st.info("⚠️ CNAEs não aderentes. Buscando Exceções...")
-        
         k_cnpj = apenas_numeros(d['cnpj'])
         df_cp['KEY'] = df_cp[COL_CNPJ_NUM].apply(apenas_numeros)
-        
         m_cp = df_cp[df_cp['KEY'] == k_cnpj]
         
         if not m_cp.empty:
@@ -244,4 +252,4 @@ if arquivo:
             st.markdown(f"**Motivo:** CNPJ na lista de exceções. ({res})")
         else:
             st.error("❌ REPROVADO (Final)")
-            st.markdown("Não atende aos requisitos de NJ, CNAE ou Lista de Exceções.")
+            st.markdown("Não atende aos requisitos.")
