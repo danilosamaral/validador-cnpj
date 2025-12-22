@@ -7,7 +7,7 @@ import os
 # ==============================================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ==============================================================================
-st.set_page_config(page_title="Validador Corporativo", layout="wide")
+st.set_page_config(page_title="Validador de Aderência Corporativa", layout="wide")
 
 # ==============================================================================
 # ARQUIVOS E COLUNAS
@@ -16,12 +16,12 @@ ARQ_NJ   = "regras_nj.csv"
 ARQ_CNAE = "regras_cnae.xlsx"
 ARQ_CNPJ = "regras_cnpj.parquet"
 
-COL_NJ_CODIGO = "CODIGO"
+COL_NJ_CODIGO = "NATJUR"
 COL_NJ_REGRA  = "ADERENCIA"
 COL_NJ_OBS    = "OBS"
 
 COL_CNAE_CODIGO = "CNAE"
-COL_CNAE_REGRA  = "PERMITIDO"
+COL_CNAE_REGRA  = "ADERENTE"
 
 COL_CNPJ_NUM = "CNPJ"
 COL_CNPJ_RES = "RESULTADO"
@@ -39,7 +39,7 @@ def corrigir_encoding(texto):
         return texto
 
 # ==============================================================================
-# FUNÇÕES AUXILIARES
+# CARREGAMENTO ROBUSTO DE BASES (PARQUET + FALLBACK)
 # ==============================================================================
 @st.cache_data
 def carregar_base(caminho):
@@ -47,25 +47,43 @@ def carregar_base(caminho):
         return None, f"Arquivo não encontrado: {caminho}"
 
     try:
-        if caminho.endswith(".parquet"):
-            df = pd.read_parquet(caminho)
-        elif caminho.endswith(".xlsx") or caminho.endswith(".xls"):
+        # ---- PARQUET (com fallback) ----
+        if caminho.lower().endswith(".parquet"):
+            try:
+                df = pd.read_parquet(caminho)
+            except Exception:
+                # fallback CSV
+                try:
+                    df = pd.read_csv(caminho, sep=";", encoding="utf-8", dtype=str)
+                except:
+                    df = pd.read_csv(caminho, sep=";", encoding="latin1", dtype=str)
+
+        # ---- EXCEL ----
+        elif caminho.lower().endswith((".xlsx", ".xls")):
             df = pd.read_excel(caminho, dtype=str)
+
+        # ---- CSV ----
         else:
             try:
                 df = pd.read_csv(caminho, sep=";", encoding="utf-8", dtype=str)
             except:
                 df = pd.read_csv(caminho, sep=";", encoding="latin1", dtype=str)
 
+        # Padronização de colunas
         df.columns = [str(c).strip().upper() for c in df.columns]
 
+        # Correção de encoding em TODAS as colunas
         for c in df.columns:
             df[c] = df[c].apply(corrigir_encoding)
 
         return df, None
-    except Exception as e:
-        return None, str(e)
 
+    except Exception as e:
+        return None, f"Erro ao ler {caminho}: {e}"
+
+# ==============================================================================
+# FUNÇÕES AUXILIARES
+# ==============================================================================
 def apenas_numeros(v):
     if not v:
         return ""
