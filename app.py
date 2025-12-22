@@ -300,5 +300,4 @@ if pdf_file:
             st.markdown(f"**Justificativa na Planilha:** {res}")
         else:
             st.error("❌ REPROVADO (Final)")
-
             st.markdown("Empresa não atende aos requisitos.")
